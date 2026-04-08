@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/scripts/pre-compact-summary.py",
+            "timeout": 15,
+            "statusMessage": "Capturing task context before compaction..."
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/scripts/post-compact-capture.py",
+            "timeout": 15,
+            "async": true,
+            "statusMessage": "Saving compaction summary..."
+          }
+        ]
+      }
+    ]
+  }
+}
