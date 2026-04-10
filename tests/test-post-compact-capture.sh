@@ -3,12 +3,20 @@ set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/post-compact-capture.sh"
 FIXTURES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures"
-OUTPUT_PATH="${HOME}/.claude/last-compact-summary.md"
-BACKUP_PATH="${HOME}/.claude/last-compact-summary.bak.md"
 PASS=0; FAIL=0
 
+# Use a temp directory so tests never touch the user's real ~/.claude/ files.
+TEST_HOME=$(mktemp -d)
+export COMPACT_OUTPUT_PATH="${TEST_HOME}/.claude/last-compact-summary.md"
+export COMPACT_BACKUP_PATH="${TEST_HOME}/.claude/last-compact-summary.bak.md"
+OUTPUT_PATH="$COMPACT_OUTPUT_PATH"
+BACKUP_PATH="$COMPACT_BACKUP_PATH"
+mkdir -p "${TEST_HOME}/.claude"
+
+# cleanup removes only the output files between tests; the EXIT trap removes
+# the whole temp dir when the test suite finishes.
 cleanup() { rm -f "$OUTPUT_PATH" "$BACKUP_PATH"; }
-trap cleanup EXIT
+trap 'rm -rf "$TEST_HOME"' EXIT
 
 assert_eq() {
   if [[ "$1" == "$2" ]]; then

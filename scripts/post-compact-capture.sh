@@ -13,8 +13,10 @@
 
 set -euo pipefail
 
-OUTPUT_PATH="${HOME}/.claude/last-compact-summary.md"
-BACKUP_PATH="${HOME}/.claude/last-compact-summary.bak.md"
+# Allow tests to override output paths via env vars so the test suite never
+# touches the user's real ~/.claude/ files.
+OUTPUT_PATH="${COMPACT_OUTPUT_PATH:-${HOME}/.claude/last-compact-summary.md}"
+BACKUP_PATH="${COMPACT_BACKUP_PATH:-${HOME}/.claude/last-compact-summary.bak.md}"
 
 INPUT=$(cat)
 
