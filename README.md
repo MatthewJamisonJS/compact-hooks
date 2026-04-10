@@ -205,6 +205,8 @@ bash tests/test-post-compact-capture.sh
 # Windows
 .\install.ps1 -Preview
 .\doctor.ps1
+pwsh tests/test-pre-compact-summary.ps1
+pwsh tests/test-post-compact-capture.ps1
 ```
 
 ---

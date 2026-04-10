@@ -1,5 +1,9 @@
+#Requires -Version 5.1
 [CmdletBinding()]
 param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 # Output path overrides for test isolation
 $OutputPath = if ($env:COMPACT_OUTPUT_PATH) { $env:COMPACT_OUTPUT_PATH } else { Join-Path $HOME ".claude/last-compact-summary.md" }

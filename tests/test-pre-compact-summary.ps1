@@ -15,28 +15,28 @@ function Assert-Contains {
 $SCRIPT = Join-Path (Split-Path $PSScriptRoot -Parent) "scripts/pre-compact-summary.ps1"
 
 # Test 1: auto trigger → hookEventName=PreCompact
-$output = '{"trigger":"auto"}' | & pwsh $SCRIPT 2>$null
+$output = '{"trigger":"auto"}' | & $SCRIPT 2>$null
 $parsed = $output | ConvertFrom-Json
 Assert-Eq "PreCompact" $parsed.hookSpecificOutput.hookEventName "auto trigger: hookEventName=PreCompact"
 
 # Test 2: auto trigger → systemMessage contains [Auto]
-$output = '{"trigger":"auto"}' | & pwsh $SCRIPT 2>$null
+$output = '{"trigger":"auto"}' | & $SCRIPT 2>$null
 Assert-Contains "[Auto]" $output "auto trigger: systemMessage contains [Auto]"
 
 # Test 3: manual trigger → systemMessage contains [Manual]
-$output = '{"trigger":"manual"}' | & pwsh $SCRIPT 2>$null
+$output = '{"trigger":"manual"}' | & $SCRIPT 2>$null
 Assert-Contains "[Manual]" $output "manual trigger: systemMessage contains [Manual]"
 
 # Test 4: unknown trigger falls back to auto
-$output = '{"trigger":"bogus"}' | & pwsh $SCRIPT 2>$null
+$output = '{"trigger":"bogus"}' | & $SCRIPT 2>$null
 Assert-Contains "[Auto]" $output "unknown trigger falls back to auto"
 
 # Test 5: malformed input → script exits 0 (fail open)
-'not json at all' | & pwsh $SCRIPT 2>$null
+'not json at all' | & $SCRIPT 2>$null
 Assert-Eq "0" "$LASTEXITCODE" "malformed input: script exits 0"
 
 # Tests 6–11: additionalContext contains all 6 required sections
-$output = '{"trigger":"auto"}' | & pwsh $SCRIPT 2>$null
+$output = '{"trigger":"auto"}' | & $SCRIPT 2>$null
 Assert-Contains "OVERALL TASK"    $output "additionalContext contains 'OVERALL TASK'"
 Assert-Contains "DECISION CHAIN"  $output "additionalContext contains 'DECISION CHAIN'"
 Assert-Contains "CURRENT STATE"   $output "additionalContext contains 'CURRENT STATE'"

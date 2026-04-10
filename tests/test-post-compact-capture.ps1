@@ -33,7 +33,7 @@ function Cleanup {
 Cleanup
 $ValidFixture = (Join-Path $FIXTURES "transcript-valid.jsonl").Replace('\','/')
 $JsonInput = '{"transcript_path":"' + $ValidFixture + '","trigger":"auto","session_id":"test-session-1"}'
-$JsonInput | & pwsh $SCRIPT
+$JsonInput | & $SCRIPT
 $Wrote = if (Test-Path $OutputPath) { "yes" } else { "no" }
 Assert-Eq "yes" $Wrote "valid transcript: summary file written"
 
@@ -49,7 +49,7 @@ Assert-Contains "test-session-1" $Content "valid transcript: session_id in heade
 Cleanup
 $NoBoundaryFixture = (Join-Path $FIXTURES "transcript-no-boundary.jsonl").Replace('\','/')
 $JsonInput = '{"transcript_path":"' + $NoBoundaryFixture + '","trigger":"auto","session_id":"test-session-2"}'
-$JsonInput | & pwsh $SCRIPT
+$JsonInput | & $SCRIPT
 $Wrote = if (Test-Path $OutputPath) { "yes" } else { "no" }
 Assert-Eq "yes" $Wrote "no-boundary transcript: file still written (fallback)"
 
@@ -57,7 +57,7 @@ Assert-Eq "yes" $Wrote "no-boundary transcript: file still written (fallback)"
 Cleanup
 $EmptyFixture = (Join-Path $FIXTURES "transcript-empty.jsonl").Replace('\','/')
 $JsonInput = '{"transcript_path":"' + $EmptyFixture + '","trigger":"auto","session_id":"test-session-2b"}'
-$JsonInput | & pwsh $SCRIPT
+$JsonInput | & $SCRIPT
 $Wrote = if (Test-Path $OutputPath) { "yes" } else { "no" }
 Assert-Eq "yes" $Wrote "empty transcript: diagnostic file still written"
 $Content = if (Test-Path $OutputPath) { Get-Content -Path $OutputPath -Raw -Encoding UTF8 } else { "" }
@@ -67,7 +67,7 @@ Assert-Contains "EXTRACTION FAILED" $Content "empty transcript: diagnostic heade
 Cleanup
 Set-Content -Path $OutputPath -Value "old summary content" -Encoding UTF8
 $JsonInput = '{"transcript_path":"' + $ValidFixture + '","trigger":"auto","session_id":"test-session-3"}'
-$JsonInput | & pwsh $SCRIPT
+$JsonInput | & $SCRIPT
 $Backed = if (Test-Path $BackupPath) { "yes" } else { "no" }
 Assert-Eq "yes" $Backed "previous summary rotated to .bak.md"
 $BakContent = if (Test-Path $BackupPath) { Get-Content -Path $BackupPath -Raw -Encoding UTF8 } else { "" }
@@ -75,13 +75,13 @@ Assert-Contains "old summary content" $BakContent "backup contains original cont
 
 # ── Test 7: malformed input exits cleanly, no file written ────────────────────
 Cleanup
-"not json" | & pwsh $SCRIPT 2>$null
+"not json" | & $SCRIPT 2>$null
 $Wrote = if (Test-Path $OutputPath) { "yes" } else { "no" }
 Assert-Eq "no" $Wrote "malformed input: no file written, exits 0"
 
 # ── Test 8: relative transcript_path is rejected ──────────────────────────────
 Cleanup
-'{"transcript_path":"relative/path.jsonl","trigger":"auto","session_id":"x"}' | & pwsh $SCRIPT 2>$null
+'{"transcript_path":"relative/path.jsonl","trigger":"auto","session_id":"x"}' | & $SCRIPT 2>$null
 $Wrote = if (Test-Path $OutputPath) { "yes" } else { "no" }
 Assert-Eq "no" $Wrote "relative transcript_path: rejected, no file written"
 

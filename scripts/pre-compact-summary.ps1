@@ -1,5 +1,9 @@
+#Requires -Version 5.1
 [CmdletBinding()]
 param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 # PreCompact hook — injects context preservation instructions into compaction.
 #

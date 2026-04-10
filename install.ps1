@@ -157,6 +157,8 @@ if (-not $Preview) {
                 [System.IO.File]::Copy($LocalPost, $PostScript, $true)
             } else {
                 # Running via iex — fetch from GitHub
+                # Enforce TLS 1.2+ for PowerShell 5.1 (defaults to TLS 1.0 on older Windows)
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
                 $BaseUrl = 'https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/scripts'
                 [System.Net.WebClient]::new().DownloadFile("$BaseUrl/pre-compact-summary.ps1",  $PreScript)
                 [System.Net.WebClient]::new().DownloadFile("$BaseUrl/post-compact-capture.ps1", $PostScript)

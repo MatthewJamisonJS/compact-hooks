@@ -2,7 +2,7 @@
 # compact-hooks installer — self-contained, works via curl or local run
 #
 # Usage:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/YOU/REPO/main/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh)
 #   bash install.sh [--verbose|-v] [--preview]
 #
 # --preview  renders the completion screen with sample data; nothing is installed
@@ -59,6 +59,112 @@ _rec_skip() { printf '%s\t%s\t%s\n' "$1" "SKIPPED"  "$3" >> "$REPORT_FILE"; ((_N
 _rec_err()  { printf '%s\t%s\t%s\n' "$1" "FAILED"   "$3" >> "$REPORT_FILE"; _ERRORS+=("$3"); }
 
 _wc() { awk 'END{print NR}' "$1"; }  # portable line count (avoids wc -l whitespace)
+
+# ── bash-native settings.json hook merger (no Python required) ───────────────
+# Injects PreCompact and/or PostCompact entries into settings.json using awk.
+# Handles: no file, empty file, no hooks section, hooks section missing entries.
+_merge_hooks_bash() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+
+  # Idempotency: skip entries that are already present
+  local need_pre=1 need_post=1
+  if [[ -f "$path" ]]; then
+    grep -qF '"PreCompact"'  "$path" 2>/dev/null && need_pre=0  || true
+    grep -qF '"PostCompact"' "$path" 2>/dev/null && need_post=0 || true
+  fi
+  [[ $need_pre -eq 0 && $need_post -eq 0 ]] && return 0
+
+  # No file, empty file, or effectively-empty {} — write from scratch
+  local _stripped=""
+  [[ -f "$path" ]] && _stripped=$(tr -d '[:space:]' < "$path")
+  if [[ ! -f "$path" ]] || [[ -z "$_stripped" ]] || [[ "$_stripped" == "{}" ]]; then
+    {
+      printf '{\n  "hooks": {\n'
+      if [[ $need_pre -eq 1 ]]; then
+        printf '    "PreCompact": [{"hooks": [{"type": "command", "command": "bash ~/.claude/scripts/pre-compact-summary.sh", "timeout": 15, "statusMessage": "Capturing task context before compaction..."}]}]'
+        [[ $need_post -eq 1 ]] && printf ','
+        printf '\n'
+      fi
+      [[ $need_post -eq 1 ]] && printf '    "PostCompact": [{"hooks": [{"type": "command", "command": "bash ~/.claude/scripts/post-compact-capture.sh", "timeout": 15, "async": true, "statusMessage": "Saving compaction summary..."}]}]\n'
+      printf '  }\n}\n'
+    } > "$path"
+    return 0
+  fi
+
+  # Validate: must start with {
+  local _fc
+  _fc=$(sed 's/^[[:space:]]*//' "$path" | head -c1)
+  [[ "$_fc" != "{" ]] && return 1
+
+  # Inject via awk: buffer all lines, track brace depth, inject at the right spot.
+  #   (a) hooks section exists but missing entries → inject before hooks closing }
+  #   (b) no hooks section → inject entire hooks block before root closing }
+  local _tmp="${path}.tmp.$$"
+  awk -v need_pre="$need_pre" -v need_post="$need_post" '
+  BEGIN {
+    PRE  = "\"PreCompact\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"bash ~/.claude/scripts/pre-compact-summary.sh\", \"timeout\": 15, \"statusMessage\": \"Capturing task context before compaction...\"}]}]"
+    POST = "\"PostCompact\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"bash ~/.claude/scripts/post-compact-capture.sh\", \"timeout\": 15, \"async\": true, \"statusMessage\": \"Saving compaction summary...\"}]}]"
+    n=0; depth=0; hooks_found=0; hooks_open_line=0; hooks_close_line=0
+    root_close_line=0; in_hooks_val=0
+  }
+  {
+    lines[++n] = $0
+    prev_d = depth
+    ll = length($0)
+    for (k=1; k<=ll; k++) {
+      c = substr($0, k, 1)
+      if (c=="{" || c=="[") depth++
+      else if (c=="}" || c=="]") {
+        depth--
+        if (depth==0) root_close_line=n
+        if (in_hooks_val && depth==1) { hooks_close_line=n; in_hooks_val=0 }
+      }
+    }
+    if (prev_d==1 && !hooks_found && $0 ~ /"hooks"/) {
+      hooks_found=1; hooks_open_line=n; in_hooks_val=1
+    }
+  }
+  END {
+    inject_at=0; inject_str=""; comma_at=0
+
+    if (hooks_found && hooks_close_line>0) {
+      inject_at = hooks_close_line
+      if (hooks_close_line > hooks_open_line+1) {
+        for (j=hooks_close_line-1; j>hooks_open_line; j--) {
+          if (lines[j] ~ /[^[:space:]]/) { comma_at=j; break }
+        }
+      }
+      if (need_pre)  inject_str = inject_str "    " PRE  (need_post ? "," : "") "\n"
+      if (need_post) inject_str = inject_str "    " POST "\n"
+    } else if (!hooks_found && root_close_line>0) {
+      inject_at = root_close_line
+      for (j=root_close_line-1; j>=1; j--) {
+        if (lines[j] ~ /[^[:space:]]/) {
+          t=lines[j]; gsub(/[[:space:]]*$/,"",t)
+          if (substr(t,length(t),1) != "{") comma_at=j
+          break
+        }
+      }
+      inject_str  = "  \"hooks\": {\n"
+      if (need_pre)  inject_str = inject_str "    " PRE  (need_post ? "," : "") "\n"
+      if (need_post) inject_str = inject_str "    " POST "\n"
+      inject_str  = inject_str "  }\n"
+    }
+
+    if (comma_at>0) {
+      t=lines[comma_at]; gsub(/[[:space:]]*$/,"",t)
+      lc=substr(t,length(t),1)
+      if (lc!="," && lc!="{" && lc!="[") lines[comma_at]=t","
+    }
+
+    for (i=1; i<=n; i++) {
+      if (i==inject_at && inject_str!="") printf "%s", inject_str
+      print lines[i]
+    }
+  }
+  ' "$path" > "$_tmp" && mv "$_tmp" "$path" || { rm -f "$_tmp"; return 1; }
+}
 
 # ── resolve per-path statuses ──────────────────────────────────────────────
 _fstatus() { [[ -f "$1" ]] && echo "OVERWRITE" || echo "NEW"; }
@@ -252,6 +358,7 @@ SESSION_ID=$(printf '%s' "$INPUT" | grep -oE '"session_id":"[^"]*"' | head -1 | 
 
 SUMMARY=""
 FAILURE_REASON=""
+FALLBACK_USED=0
 
 # Step 1: find the compact_boundary UUID (last occurrence wins)
 BOUNDARY_UUID=""
@@ -298,6 +405,7 @@ if [[ -z "$SUMMARY" ]]; then
   if [[ -n "$FALLBACK" ]]; then
     SUMMARY="$FALLBACK"
     FAILURE_REASON="primary extraction failed — using last assistant message as fallback"
+    FALLBACK_USED=1
   else
     FAILURE_REASON="no compact_boundary found and no assistant content in transcript"
   fi
@@ -330,6 +438,9 @@ The previous session's context could not be recovered from this compaction.
 Start fresh or check ~/.claude/last-compact-summary.bak.md for the prior summary.
 EOF
 else
+  # When fallback was used, prepend a note so the next session knows the source.
+  _FALLBACK_NOTE=""
+  [[ $FALLBACK_USED -eq 1 ]] && _FALLBACK_NOTE=$'<!-- Note: primary extraction failed — using last assistant message as fallback -->\n\n'
   cat > "$OUTPUT_PATH" << EOF
 <!-- auto-generated by post-compact-capture.sh — do not edit -->
 # Last Compaction Summary
@@ -340,7 +451,7 @@ else
 
 ---
 
-${SUMMARY}
+${_FALLBACK_NOTE}${SUMMARY}
 EOF
 fi
 SHEOF
@@ -365,67 +476,9 @@ info "Merges PreCompact + PostCompact entries (existing hooks preserved)"
 
 if _prompt; then
   _settings_action="$ST_SETTINGS"
-  if python3 - << 'PYEOF'
-import json, os, sys
-
-settings_path = os.path.expanduser("~/.claude/settings.json")
-
-new_hooks = {
-    "PreCompact": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash ~/.claude/scripts/pre-compact-summary.sh",
-                    "timeout": 15,
-                    "statusMessage": "Capturing task context before compaction..."
-                }
-            ]
-        }
-    ],
-    "PostCompact": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash ~/.claude/scripts/post-compact-capture.sh",
-                    "timeout": 15,
-                    "async": True,
-                    "statusMessage": "Saving compaction summary..."
-                }
-            ]
-        }
-    ]
-}
-
-settings = {}
-if os.path.exists(settings_path):
-    with open(settings_path) as f:
-        try:
-            settings = json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"MALFORMED_JSON:{e}", file=sys.stderr)
-            sys.exit(1)
-
-settings.setdefault("hooks", {}).update(new_hooks)
-
-os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-with open(settings_path, "w") as f:
-    json.dump(settings, f, indent=2)
-
-PYEOF
-  then
-    _all_hooks=$(python3 -c "
-import json,os
-try:
-    s=json.load(open(os.path.expanduser('~/.claude/settings.json')))
-    print(', '.join(s.get('hooks',{}).keys()))
-except Exception:
-    print('(unreadable)')
-")
+  if _merge_hooks_bash "$SETTINGS_PATH"; then
     ok "PreCompact hook registered"
     ok "PostCompact hook registered"
-    info "All active hooks: ${_all_hooks}"
     _rec_ok "$SETTINGS_PATH" "$_settings_action" "PreCompact + PostCompact added"
   else
     _rec_err "$SETTINGS_PATH" "settings.json parse failed — run doctor.sh"
