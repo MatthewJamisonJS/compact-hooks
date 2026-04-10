@@ -147,11 +147,11 @@ if [[ "$VERBOSE" -eq 1 ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 1 — Python scripts
+#  STEP 1 — Shell scripts
 # ═══════════════════════════════════════════════════════════════════════════════
-step 1 "Python scripts → ${SCRIPTS_DIR}/"
-info "pre-compact-summary.py  — inject context instructions before compaction"
-info "post-compact-capture.py — save compaction summary to disk"
+step 1 "Shell scripts → ${SCRIPTS_DIR}/"
+info "pre-compact-summary.sh  — inject context instructions before compaction"
+info "post-compact-capture.sh — save compaction summary to disk"
 
 if _prompt; then
   mkdir -p "$SCRIPTS_DIR"
