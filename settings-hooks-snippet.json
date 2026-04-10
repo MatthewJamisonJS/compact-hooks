@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/scripts/pre-compact-summary.py",
+            "command": "bash ~/.claude/scripts/pre-compact-summary.sh",
             "timeout": 15,
             "statusMessage": "Capturing task context before compaction..."
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/scripts/post-compact-capture.py",
+            "command": "bash ~/.claude/scripts/post-compact-capture.sh",
             "timeout": 15,
             "async": true,
             "statusMessage": "Saving compaction summary..."
