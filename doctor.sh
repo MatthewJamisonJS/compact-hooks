@@ -7,8 +7,8 @@
 
 set -euo pipefail
 
-PRE_SCRIPT="${HOME}/.claude/scripts/pre-compact-summary.py"
-POST_SCRIPT="${HOME}/.claude/scripts/post-compact-capture.py"
+PRE_SCRIPT="${HOME}/.claude/scripts/pre-compact-summary.sh"
+POST_SCRIPT="${HOME}/.claude/scripts/post-compact-capture.sh"
 SETTINGS_PATH="${HOME}/.claude/settings.json"
 CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
 SESSION_MARKER="# Session Resume"
@@ -36,15 +36,7 @@ _chk() {
 
 # ── run checks ─────────────────────────────────────────────────────────────────
 
-# 1. python3
-if command -v python3 &>/dev/null; then
-  _PY=$(python3 --version 2>&1)
-  _chk "python3 in PATH" "PASS" "$_PY"
-else
-  _chk "python3 in PATH" "FAIL" "install via: brew install python3"
-fi
-
-# 2-3. Scripts exist + executable
+# 1-2. Scripts exist + executable
 for _f in "$PRE_SCRIPT" "$POST_SCRIPT"; do
   _name=$(basename "$_f")
   if [[ ! -f "$_f" ]]; then
@@ -64,21 +56,22 @@ done
 # 4. settings.json valid JSON
 if [[ ! -f "$SETTINGS_PATH" ]]; then
   _chk "settings.json exists" "FAIL" "re-run install.sh"
-elif python3 -c "import json; json.load(open('$SETTINGS_PATH'))" 2>/dev/null; then
+elif bash -c "
+  content=\$(cat '$SETTINGS_PATH')
+  trimmed=\$(printf '%s' \"\$content\" | sed 's/^[[:space:]]*//')
+  [[ \"\${trimmed:0:1}\" == '{' || \"\${trimmed:0:1}\" == '[' ]]
+" 2>/dev/null; then
   _chk "settings.json valid JSON" "PASS" ""
 
   # 5-6. Hook entries present
   for _hook in PreCompact PostCompact; do
-    _present=$(python3 -c "
-import json
-s = json.load(open('$SETTINGS_PATH'))
-print('yes' if '$_hook' in s.get('hooks', {}) else 'no')
-")
+    _present=$(grep -qF "\"$_hook\"" "$SETTINGS_PATH" && echo "yes" || echo "no")
     if [[ "$_present" == "yes" ]]; then
       _chk "${_hook} hook registered" "PASS" ""
     else
-      # Auto-fix: merge the missing hook
-      python3 - << PYEOF
+      # Auto-fix: merge the missing hook (uses python3 if available; else advises manual fix)
+      if command -v python3 &>/dev/null; then
+        python3 - << PYEOF
 import json, os
 
 settings_path = os.path.expanduser("~/.claude/settings.json")
@@ -86,10 +79,10 @@ hook_name = "$_hook"
 
 new_entry = {
     "PreCompact": [{"hooks": [{"type": "command",
-        "command": "python3 ~/.claude/scripts/pre-compact-summary.py",
+        "command": "bash ~/.claude/scripts/pre-compact-summary.sh",
         "timeout": 15, "statusMessage": "Capturing task context..."}]}],
     "PostCompact": [{"hooks": [{"type": "command",
-        "command": "python3 ~/.claude/scripts/post-compact-capture.py",
+        "command": "bash ~/.claude/scripts/post-compact-capture.sh",
         "timeout": 15, "async": True, "statusMessage": "Saving summary..."}]}],
 }[hook_name]
 
@@ -101,7 +94,10 @@ settings.setdefault("hooks", {})[hook_name] = new_entry
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
 PYEOF
-      _chk "${_hook} hook registered" "FIXED" "hook entry added to settings.json"
+        _chk "${_hook} hook registered" "FIXED" "hook entry added to settings.json"
+      else
+        _chk "${_hook} hook registered" "FAIL" "add hook manually — see settings-hooks-snippet.json"
+      fi
     fi
   done
 else
@@ -124,21 +120,16 @@ If `~/.claude/last-compact-summary.md` exists, read it before doing anything els
   _chk "CLAUDE.md has Session Resume" "FIXED" "block prepended"
 fi
 
-# 8. Dry-run pre-compact-summary.py
-if [[ -f "$PRE_SCRIPT" && -x "$PRE_SCRIPT" ]] && command -v python3 &>/dev/null; then
-  _dry=$(echo '{"trigger":"auto"}' | python3 "$PRE_SCRIPT" 2>/dev/null || echo "ERROR")
-  if echo "$_dry" | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-assert 'hookSpecificOutput' in d
-assert d['hookSpecificOutput'].get('hookEventName') == 'PreCompact'
-" 2>/dev/null; then
-    _chk "pre-compact-summary.py dry-run" "PASS" "JSON output valid"
+# 8. Dry-run pre-compact-summary.sh
+if [[ -f "$PRE_SCRIPT" && -x "$PRE_SCRIPT" ]]; then
+  _dry=$(printf '{"trigger":"auto"}' | bash "$PRE_SCRIPT" 2>/dev/null || echo "ERROR")
+  if printf '%s' "$_dry" | grep -qF '"hookEventName":"PreCompact"'; then
+    _chk "pre-compact-summary.sh dry-run" "PASS" "JSON output valid"
   else
-    _chk "pre-compact-summary.py dry-run" "FAIL" "script produced unexpected output — re-run install.sh"
+    _chk "pre-compact-summary.sh dry-run" "FAIL" "script produced unexpected output — re-run install.sh"
   fi
 else
-  _chk "pre-compact-summary.py dry-run" "WARN" "skipped (script missing or no python3)"
+  _chk "pre-compact-summary.sh dry-run" "WARN" "skipped (script missing or not executable)"
 fi
 
 # ── render report ──────────────────────────────────────────────────────────────
