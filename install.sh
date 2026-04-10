@@ -43,8 +43,8 @@ ask() { IFS= read -r "$1" </dev/tty 2>/dev/null || true; }
 SCRIPTS_DIR="${HOME}/.claude/scripts"
 SETTINGS_PATH="${HOME}/.claude/settings.json"
 CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
-PRE_SCRIPT="${SCRIPTS_DIR}/pre-compact-summary.py"
-POST_SCRIPT="${SCRIPTS_DIR}/post-compact-capture.py"
+PRE_SCRIPT="${SCRIPTS_DIR}/pre-compact-summary.sh"
+POST_SCRIPT="${SCRIPTS_DIR}/post-compact-capture.sh"
 SESSION_MARKER="# Session Resume"
 
 # ── tracking (tab-separated: path | action | note) ────────────────────────────
@@ -59,10 +59,6 @@ _rec_skip() { printf '%s\t%s\t%s\n' "$1" "SKIPPED"  "$3" >> "$REPORT_FILE"; ((_N
 _rec_err()  { printf '%s\t%s\t%s\n' "$1" "FAILED"   "$3" >> "$REPORT_FILE"; _ERRORS+=("$3"); }
 
 _wc() { awk 'END{print NR}' "$1"; }  # portable line count (avoids wc -l whitespace)
-
-# ── pre-flight: python3 required ────────────────────────────────────────────
-command -v python3 &>/dev/null \
-  || fail "python3 not found. Install via: brew install python3"
 
 # ── resolve per-path statuses ──────────────────────────────────────────────
 _fstatus() { [[ -f "$1" ]] && echo "OVERWRITE" || echo "NEW"; }
@@ -99,7 +95,7 @@ hdr "  compact-hooks installer"
 bar
 
 printf "\n${B}What this installs:${R}\n"
-printf "  ✦ 2 Python hook scripts → Claude Code hook execution engines\n"
+printf "  ✦ 2 shell hook scripts  → Claude Code hook execution engines\n"
 printf "  ✦ 2 hook entries        → merged into settings.json (PreCompact + PostCompact)\n"
 printf "  ✦ Session Resume block  → prepended to CLAUDE.md\n"
 
@@ -124,19 +120,19 @@ fi
 if [[ "$VERBOSE" -eq 1 ]]; then
   hdr "Details"
 
-  printf "\n${B}pre-compact-summary.py${R}  ${D}(PreCompact hook)${R}\n"
+  printf "\n${B}pre-compact-summary.sh${R}  ${D}(PreCompact hook)${R}\n"
   printf "  Runs before each compaction. Outputs a JSON payload that injects structured\n"
   printf "  instructions into the compaction context, telling Claude to preserve:\n"
   printf "  overall task, decision chain, current state, and open blockers.\n"
 
-  printf "\n${B}post-compact-capture.py${R}  ${D}(PostCompact hook, async)${R}\n"
+  printf "\n${B}post-compact-capture.sh${R}  ${D}(PostCompact hook, async)${R}\n"
   printf "  Runs after compaction. Reads the session transcript JSONL, locates the\n"
   printf "  compact_boundary entry, extracts Claude's summary, and writes it to:\n"
   printf "    %s\n" "${HOME}/.claude/last-compact-summary.md"
 
   printf "\n${B}settings.json — hooks to be merged:${R}\n"
-  printf '  "PreCompact":  python3 ~/.claude/scripts/pre-compact-summary.py\n'
-  printf '  "PostCompact": python3 ~/.claude/scripts/post-compact-capture.py  (async)\n'
+  printf '  "PreCompact":  bash ~/.claude/scripts/pre-compact-summary.sh\n'
+  printf '  "PostCompact": bash ~/.claude/scripts/post-compact-capture.sh  (async)\n'
 
   printf "\n${B}CLAUDE.md — block to be prepended:${R}\n"
   printf "  # Session Resume\n"
@@ -160,158 +156,201 @@ info "post-compact-capture.py — save compaction summary to disk"
 if _prompt; then
   mkdir -p "$SCRIPTS_DIR"
 
-  cat > "$PRE_SCRIPT" << 'PYEOF'
-#!/usr/bin/env python3
-"""
-PreCompact hook: injects structured summary instructions into compaction context.
+  # Locate the scripts/ directory relative to this installer.
+  # Works for local runs; curl | bash runs from a temp location so we embed inline.
+  _SCRIPT_DIR=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
+    _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  fi
 
-Security notes:
-  - Reads stdin via json.load() — no shell word splitting, no injection risk
-  - trigger field validated against an allowlist before use
-  - Output serialized via json.dumps() — never built by string interpolation
-"""
-import json
-import sys
+  if [[ -n "$_SCRIPT_DIR" && -f "${_SCRIPT_DIR}/scripts/pre-compact-summary.sh" ]]; then
+    cp "${_SCRIPT_DIR}/scripts/pre-compact-summary.sh" "$PRE_SCRIPT"
+    cp "${_SCRIPT_DIR}/scripts/post-compact-capture.sh" "$POST_SCRIPT"
+  else
+    cat > "$PRE_SCRIPT" << 'SHEOF'
+#!/usr/bin/env bash
+# PreCompact hook — injects context preservation instructions into compaction.
+#
+# Input (stdin):  {"trigger":"auto"|"manual"}
+# Output (stdout): JSON payload with hookSpecificOutput and systemMessage
+#
+# Security: reads stdin only; no shell interpolation of external values into commands;
+# CONTEXT is a literal constant — not derived from user input.
 
-VALID_TRIGGERS = {"auto", "manual"}
+set -euo pipefail
 
+INPUT=$(cat)
 
-def main():
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        # Fail open: if we can't parse input, don't block compaction
-        sys.exit(0)
+# Extract trigger field; || true prevents grep's exit-1-on-no-match from aborting under set -e.
+RAW_TRIGGER=$(printf '%s' "$INPUT" | grep -oE '"trigger":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
-    raw_trigger = data.get("trigger", "auto")
-    trigger = raw_trigger if raw_trigger in VALID_TRIGGERS else "auto"
+# If input contains no "trigger" key at all (e.g. not valid JSON), fail open: exit 0 silently.
+# This lets Claude proceed normally rather than injecting a malformed hook payload.
+if [[ -z "$RAW_TRIGGER" ]]; then
+  exit 0
+fi
 
-    additional_context = (
-        "COMPACTION IMMINENT — your summary MUST preserve ALL of the following:\n\n"
-        "1. OVERALL TASK (root goal, not just current step)\n"
-        "   What is the user ultimately trying to accomplish?\n\n"
-        "2. DECISION CHAIN (reasoning trail)\n"
-        "   What key decisions were made? Why was approach X chosen over Y?\n"
-        "   What constraints or discoveries shaped those choices?\n\n"
-        "3. CURRENT STATE\n"
-        "   What has been completed? What is in-progress? What remains?\n\n"
-        "4. OPEN QUESTIONS / BLOCKERS\n"
-        "   Any unresolved ambiguities, pending confirmations, or known issues?\n\n"
-        "This structured context must survive compaction intact "
-        "so work can resume without losing the logical thread."
-    )
+# Normalise unknown trigger values to "auto" (e.g. trigger="bogus").
+TRIGGER="$RAW_TRIGGER"
+case "$TRIGGER" in
+  auto|manual) ;;
+  *) TRIGGER="auto" ;;
+esac
 
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreCompact",
-            "additionalContext": additional_context,
-        },
-        "systemMessage": (
-            f"[pre-compact-summary] {trigger.capitalize()} compaction triggered — "
-            "task context and decision chain will be preserved in summary."
-        ),
-    }
+# Capitalize first letter for display (bash 3.2 compatible — no ${var^})
+LABEL=$(printf '%s' "$TRIGGER" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
 
-    print(json.dumps(output))
+# \n in single-quoted strings are literal backslash-n — correct for JSON string embedding.
+# A JSON parser receiving this output will interpret \n as newline.
+# The em dash is valid UTF-8 in a JSON string.
+CONTEXT='COMPACTION IMMINENT \u2014 your summary MUST preserve ALL of the following:\n\n1. OVERALL TASK\n   What is the user ultimately trying to accomplish? Include the acceptance criteria for done.\n\n2. DECISION CHAIN\n   Key decisions made this session: what was chosen, why X over Y, what constraint or discovery drove it.\n\n3. CURRENT STATE\n   Done / in-progress (specific function names or line numbers) / remaining.\n\n4. ACTIVE FILES\n   Exact paths of every file read, written, or edited this session.\n\n5. LAST ERROR\n   Most recent error message, quoted verbatim. State whether it was resolved.\n\n6. OPEN QUESTIONS\n   Unresolved questions or blockers. Quote error messages directly \u2014 do not paraphrase.\n\nThis structured context must survive compaction intact so work can resume without losing the logical thread.'
 
+# Escape any double quotes in CONTEXT for safe JSON string embedding.
+ESCAPED=$(printf '%s' "$CONTEXT" | sed 's/"/\\"/g')
 
-if __name__ == "__main__":
-    main()
-PYEOF
+printf '{"hookSpecificOutput":{"hookEventName":"PreCompact","additionalContext":"%s"},"systemMessage":"[%s] compaction triggered. Capturing task context..."}\n' \
+  "$ESCAPED" \
+  "$LABEL"
+SHEOF
+    cat > "$POST_SCRIPT" << 'SHEOF'
+#!/usr/bin/env bash
+# PostCompact hook — extracts compaction summary from transcript and saves it.
+#
+# Input (stdin):  {"transcript_path":"/abs/path","trigger":"auto","session_id":"..."}
+# Output:         writes ~/.claude/last-compact-summary.md
+#
+# Resilience:
+#   - Fallback extraction if primary (parentUuid match) finds nothing
+#   - Rotates existing summary to .bak.md before overwriting
+#   - Writes a diagnostic file on failure so the next session knows not to trust it
+#
+# Security: transcript_path validated as absolute before use; no eval or shell interpolation.
 
-  cat > "$POST_SCRIPT" << 'PYEOF'
-#!/usr/bin/env python3
-"""
-PostCompact hook: extracts the compaction summary from the transcript
-and writes it to ~/.claude/last-compact-summary.md for cross-session recovery.
+set -euo pipefail
 
-Security notes:
-  - Reads stdin via json.load() — no shell word splitting
-  - transcript_path validated as an absolute path before use
-  - All file I/O uses Python builtins — no shell execution
-  - Output file is user-scoped (~/.claude/) — no privilege escalation
-"""
-import json
-import os
-import sys
-from datetime import datetime, timezone
-from typing import Optional
+# Allow tests to override output paths via env vars so the test suite never
+# touches the user's real ~/.claude/ files.
+OUTPUT_PATH="${COMPACT_OUTPUT_PATH:-${HOME}/.claude/last-compact-summary.md}"
+BACKUP_PATH="${COMPACT_BACKUP_PATH:-${HOME}/.claude/last-compact-summary.bak.md}"
 
-OUTPUT_PATH = os.path.expanduser("~/.claude/last-compact-summary.md")
+INPUT=$(cat)
 
+# Extract fields; || true prevents grep exit-1 from aborting under set -e
+TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | grep -oE '"transcript_path":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+TRIGGER=$(printf '%s' "$INPUT" | grep -oE '"trigger":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+SESSION_ID=$(printf '%s' "$INPUT" | grep -oE '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
-def extract_summary(transcript_path: str) -> Optional[str]:
-    try:
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            entries = [json.loads(line) for line in f if line.strip()]
-    except (OSError, json.JSONDecodeError):
-        return None
+[[ -z "$TRANSCRIPT_PATH" ]] && exit 0
+# Reject relative paths (path traversal guard)
+[[ "${TRANSCRIPT_PATH:0:1}" != "/" ]] && exit 0
+[[ ! -f "$TRANSCRIPT_PATH" ]] && exit 0
 
-    boundary_uuid = None
-    for entry in reversed(entries):
-        if entry.get("type") == "system" and entry.get("subtype") == "compact_boundary":
-            boundary_uuid = entry.get("uuid")
-            break
+[[ -z "$TRIGGER" ]]    && TRIGGER="auto"
+[[ -z "$SESSION_ID" ]] && SESSION_ID="unknown"
 
-    if not boundary_uuid:
-        return None
+# ── extraction ────────────────────────────────────────────────────────────────
 
-    for entry in entries:
-        if entry.get("parentUuid") == boundary_uuid and entry.get("type") == "user":
-            msg = entry.get("message") or entry.get("content")
-            if isinstance(msg, dict):
-                return msg.get("content", "")
-            if isinstance(msg, str):
-                return msg
-            break
+SUMMARY=""
+FAILURE_REASON=""
 
-    return None
+# Step 1: find the compact_boundary UUID (last occurrence wins)
+BOUNDARY_UUID=""
+while IFS= read -r LINE || [[ -n "$LINE" ]]; do
+  if printf '%s' "$LINE" | grep -qF '"subtype":"compact_boundary"'; then
+    BOUNDARY_UUID=$(printf '%s' "$LINE" | grep -oE '"uuid":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  fi
+done < "$TRANSCRIPT_PATH"
 
+# Step 2 (primary): find user entry whose parentUuid matches the boundary
+if [[ -n "$BOUNDARY_UUID" ]]; then
+  while IFS= read -r LINE || [[ -n "$LINE" ]]; do
+    if printf '%s' "$LINE" | grep -qF "\"parentUuid\":\"${BOUNDARY_UUID}\""; then
+      # Extract JSON string value — handles escape sequences via [^"\\]*(\\.[^"\\]*)*
+      SUMMARY=$(printf '%s' "$LINE" | grep -oE '"content":"([^"\\]|\\.)*"' | head -1 \
+        | sed 's/^"content":"//; s/"$//' \
+        | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' \
+        || true)
+      if [[ -z "$SUMMARY" ]]; then
+        # Array content block: {"type":"text","text":"..."}
+        SUMMARY=$(printf '%s' "$LINE" | grep -oE '"text":"([^"\\]|\\.)*"' | head -1 \
+          | sed 's/^"text":"//; s/"$//' \
+          | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' \
+          || true)
+      fi
+      break
+    fi
+  done < "$TRANSCRIPT_PATH"
+fi
 
-def main():
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        sys.exit(0)
+# Step 3 (fallback): scan for the last substantial assistant message
+if [[ -z "$SUMMARY" ]]; then
+  FALLBACK=""
+  while IFS= read -r LINE || [[ -n "$LINE" ]]; do
+    if printf '%s' "$LINE" | grep -qF '"role":"assistant"'; then
+      CANDIDATE=$(printf '%s' "$LINE" | grep -oE '"content":"([^"\\]|\\.)*"' | head -1 \
+        | sed 's/^"content":"//; s/"$//' \
+        | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' \
+        || true)
+      [[ -n "$CANDIDATE" ]] && FALLBACK="$CANDIDATE"
+    fi
+  done < "$TRANSCRIPT_PATH"
 
-    raw_path = data.get("transcript_path", "")
-    if not raw_path or not os.path.isabs(raw_path):
-        sys.exit(0)
-    transcript_path = os.path.normpath(raw_path)
+  if [[ -n "$FALLBACK" ]]; then
+    SUMMARY="$FALLBACK"
+    FAILURE_REASON="primary extraction failed — using last assistant message as fallback"
+  else
+    FAILURE_REASON="no compact_boundary found and no assistant content in transcript"
+  fi
+fi
 
-    summary = extract_summary(transcript_path)
-    if not summary:
-        sys.exit(0)
+# ── rotate existing summary before writing ────────────────────────────────────
+if [[ -f "$OUTPUT_PATH" ]]; then
+  cp "$OUTPUT_PATH" "$BACKUP_PATH"
+fi
 
-    trigger = data.get("trigger", "auto")
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    session_id = data.get("session_id", "unknown")
+# ── write output ──────────────────────────────────────────────────────────────
+TIMESTAMP=$(date -u "+%Y-%m-%d %H:%M UTC" 2>/dev/null || date "+%Y-%m-%d %H:%M UTC")
+mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-    content = (
-        f"<!-- auto-generated by post-compact-capture.py — do not edit -->\n"
-        f"# Last Compaction Summary\n\n"
-        f"**Captured:** {timestamp}  \n"
-        f"**Trigger:** {trigger}  \n"
-        f"**Session:** {session_id}\n\n"
-        f"---\n\n"
-        f"{summary.strip()}\n"
-    )
+if [[ -z "$SUMMARY" ]]; then
+  # Write diagnostic so the next session knows the summary is not trustworthy
+  cat > "$OUTPUT_PATH" << EOF
+<!-- auto-generated by post-compact-capture.sh — do not edit -->
+# Last Compaction Summary
 
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(content)
+**Captured:** ${TIMESTAMP}
+**Trigger:** ${TRIGGER}
+**Session:** ${SESSION_ID}
 
-    sys.exit(0)
+---
 
+[EXTRACTION FAILED: ${FAILURE_REASON}]
 
-if __name__ == "__main__":
-    main()
-PYEOF
+The previous session's context could not be recovered from this compaction.
+Start fresh or check ~/.claude/last-compact-summary.bak.md for the prior summary.
+EOF
+else
+  cat > "$OUTPUT_PATH" << EOF
+<!-- auto-generated by post-compact-capture.sh — do not edit -->
+# Last Compaction Summary
 
+**Captured:** ${TIMESTAMP}
+**Trigger:** ${TRIGGER}
+**Session:** ${SESSION_ID}
+
+---
+
+${SUMMARY}
+EOF
+fi
+SHEOF
+  fi
   chmod +x "$PRE_SCRIPT" "$POST_SCRIPT"
-  ok "pre-compact-summary.py"
-  ok "post-compact-capture.py"
+  ok "pre-compact-summary.sh"
+  ok "post-compact-capture.sh"
   _rec_ok "$PRE_SCRIPT"  "CREATED" "$(_wc "$PRE_SCRIPT") lines · chmod +x"
   _rec_ok "$POST_SCRIPT" "CREATED" "$(_wc "$POST_SCRIPT") lines · chmod +x"
+
 else
   skp "Step 1 skipped"
   _rec_skip "$PRE_SCRIPT"  "" "user skipped"
@@ -337,7 +376,7 @@ new_hooks = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "python3 ~/.claude/scripts/pre-compact-summary.py",
+                    "command": "bash ~/.claude/scripts/pre-compact-summary.sh",
                     "timeout": 15,
                     "statusMessage": "Capturing task context before compaction..."
                 }
@@ -349,7 +388,7 @@ new_hooks = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "python3 ~/.claude/scripts/post-compact-capture.py",
+                    "command": "bash ~/.claude/scripts/post-compact-capture.sh",
                     "timeout": 15,
                     "async": True,
                     "statusMessage": "Saving compaction summary..."
@@ -431,8 +470,8 @@ else
   # ── preview: inject sample data, skip all install steps ──────────────────────
   _N_OK=3; _N_SKIP=1; _N_ERR=0
   {
-    printf '%s\tCREATED\t59 lines · chmod +x\n'           "$PRE_SCRIPT"
-    printf '%s\tCREATED\t93 lines · chmod +x\n'           "$POST_SCRIPT"
+    printf '%s\tCREATED\t43 lines · chmod +x\n'           "$PRE_SCRIPT"
+    printf '%s\tCREATED\t130 lines · chmod +x\n'          "$POST_SCRIPT"
     printf '%s\tMERGED\tPreCompact + PostCompact added\n'  "$SETTINGS_PATH"
     printf '%s\tSKIPPED\tSession Resume already present\n' "$CLAUDE_MD"
   } > "$REPORT_FILE"
