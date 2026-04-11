@@ -284,8 +284,18 @@ If ``~/.claude/last-compact-summary.md`` exists, read it before doing anything e
 
 } else {
     # ── preview ───────────────────────────────────────────────────────────────
-    Add-ReportRow -Path $PreScript    -Action 'CREATED' -Note 'written'
-    Add-ReportRow -Path $PostScript   -Action 'CREATED' -Note 'written'
+    # Compute line counts from source scripts when running locally ($PSScriptRoot
+    # is set); fall back to a plain note when piped via iex ($PSScriptRoot empty).
+    $PreNote  = 'written'
+    $PostNote = 'written'
+    if ($PSScriptRoot) {
+        $SrcPre  = Join-Path $PSScriptRoot 'scripts\pre-compact-summary.ps1'
+        $SrcPost = Join-Path $PSScriptRoot 'scripts\post-compact-capture.ps1'
+        if (Test-Path $SrcPre)  { $PreNote  = "$((Get-Content $SrcPre).Count) lines" }
+        if (Test-Path $SrcPost) { $PostNote = "$((Get-Content $SrcPost).Count) lines" }
+    }
+    Add-ReportRow -Path $PreScript    -Action 'CREATED' -Note $PreNote
+    Add-ReportRow -Path $PostScript   -Action 'CREATED' -Note $PostNote
     Add-ReportRow -Path $SettingsPath -Action 'MERGED'  -Note 'PreCompact + PostCompact added'
     Add-ReportRow -Path $ClaudeMdPath -Action 'SKIPPED' -Note 'Session Resume already present'
 }
