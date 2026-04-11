@@ -6,8 +6,7 @@ When Claude compacts a long conversation, these hooks make sure the context that
 
 It's a starting point. The defaults are mine. Change them to fit how you work.
 
-![Python](https://img.shields.io/badge/python-3.7%2B-8be9fd?style=flat-square&labelColor=282a36)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-bd93f9?style=flat-square&labelColor=282a36)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-bd93f9?style=flat-square&labelColor=282a36)
 ![License](https://img.shields.io/badge/license-MIT-50fa7b?style=flat-square&labelColor=282a36)
 
 ---
@@ -22,21 +21,38 @@ This is just two small hook scripts and one line in your CLAUDE.md that work tog
 
 ## Install
 
-**You'll need:** Python 3.7+ and Claude Code.
+**You'll need:** Claude Code (recent version with `PreCompact`/`PostCompact` hook support).
+
+No other dependencies — no Python, Node, or any runtime.
+
+**macOS / Linux:**
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh)
 ```
 
-> [!NOTE]
-> Use `bash <(...)` rather than `curl ... | bash`. The `<(...)` form keeps your terminal's stdin connected so the interactive prompts work correctly.
+**Windows (PowerShell 5.1+):**
 
-The installer shows you what it's going to do and where before it does anything, and asks you to confirm each step.
+```powershell
+irm https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.ps1 | iex
+```
+
+> **macOS / Linux:** Use `bash <(...)` rather than `curl ... | bash`. The `<(...)` form keeps your terminal's stdin connected so the interactive prompts work correctly.
+>
+> **Windows:** If you see a security prompt about running remote scripts, run `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` first, then retry.
+
+Both installers show you what they're going to do before doing it, and ask to confirm each step. Running either installer again is safe.
 
 **Just want to see what the finish screen looks like without actually installing?**
 
 ```bash
+# macOS / Linux
 bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh) --preview
+```
+
+```powershell
+# Windows
+.\install.ps1 -Preview
 ```
 
 ---
@@ -45,9 +61,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hoo
 
 | File | Where | What it does |
 |---|---|---|
-| `pre-compact-summary.py` | `~/.claude/scripts/` | Runs before compaction — tells Claude what to preserve |
-| `post-compact-capture.py` | `~/.claude/scripts/` | Runs after compaction — saves the summary to disk |
-| Hook entries | `~/.claude/settings.json` | Wires the two scripts into Claude Code's lifecycle |
+| `pre-compact-summary.sh` (macOS/Linux) | `~/.claude/scripts/` | Runs before compaction — tells Claude what to preserve |
+| `pre-compact-summary.ps1` (Windows) | `~/.claude/scripts/` | Same, PowerShell variant |
+| `post-compact-capture.sh` (macOS/Linux) | `~/.claude/scripts/` | Runs after compaction — saves the summary to disk |
+| `post-compact-capture.ps1` (Windows) | `~/.claude/scripts/` | Same, PowerShell variant |
+| Hook entries | `~/.claude/settings.json` | Wires the scripts into Claude Code's lifecycle |
 | Session Resume block | `~/.claude/CLAUDE.md` | Tells Claude to load the saved summary at session start |
 
 Anything you already have in `settings.json` or `CLAUDE.md` stays untouched. Running the installer again is safe.
@@ -70,8 +88,16 @@ Start a new session after that. If a summary was saved, Claude will read it befo
 
 ## Something's broken
 
+**macOS / Linux:**
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.sh)
+```
+
+**Windows:**
+
+```powershell
+irm https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.ps1 | iex
 ```
 
 This runs through 8 checks and fixes what it can on its own. If the scripts themselves need to be rewritten, it'll tell you to re-run the installer.
@@ -83,18 +109,22 @@ This runs through 8 checks and fixes what it can on its own. If the scripts them
 <details>
 <summary>Show technical details</summary>
 
-**Before compaction (`pre-compact-summary.py`)**
+**Before compaction (`pre-compact-summary.sh` / `pre-compact-summary.ps1`)**
 
 Claude Code fires this hook before compacting. The script returns a JSON payload that gets passed into the compaction model, asking it to specifically preserve:
 
 - What the user is ultimately trying to accomplish
 - The reasoning behind key decisions made during the session
 - What's done, what's in progress, what's next
+- Exact paths of every file touched this session
+- The most recent error message verbatim
 - Any unresolved questions or blockers
 
-**After compaction (`post-compact-capture.py`)**
+**After compaction (`post-compact-capture.sh` / `post-compact-capture.ps1`)**
 
 This one runs in the background after compaction finishes. It reads the session transcript, finds the compaction boundary, pulls out the summary Claude wrote, and saves it to `~/.claude/last-compact-summary.md` with a timestamp.
+
+If the primary extraction fails, it falls back to the last assistant message. If that also fails, it writes a diagnostic file so the next session knows the summary is not trustworthy.
 
 **Session Resume**
 
@@ -102,8 +132,8 @@ A two-line addition to `~/.claude/CLAUDE.md` tells Claude to check for that file
 
 **A few notes on the implementation**
 
-- Pure Python stdlib — nothing to install, no network calls
-- Input is parsed with `json.load()`, never `eval()` or shell interpolation
+- Zero runtime dependencies — bash 3.2+ on macOS/Linux, PowerShell 5.1+ on Windows (both built in)
+- Input is parsed with native JSON tooling, never `eval()` or shell interpolation
 - The transcript path is validated as absolute before use
 - Everything writes to `~/.claude/` — no elevated permissions needed
 
@@ -115,15 +145,20 @@ A two-line addition to `~/.claude/CLAUDE.md` tells Claude to check for that file
 
 ```
 compact-hooks/
-├── install.sh                  # self-contained installer — the only file curl needs
-├── doctor.sh                   # checks the installation and fixes common issues
-├── pre-compact-summary.py      # readable copy of the PreCompact hook
-├── post-compact-capture.py     # readable copy of the PostCompact hook
-├── settings-hooks-snippet.json # the hook config that gets merged into settings.json
-└── CLAUDE-md-addition.md       # the block that gets added to CLAUDE.md
+├── install.sh                   # macOS / Linux installer
+├── install.ps1                  # Windows installer
+├── doctor.sh                    # macOS / Linux health check
+├── doctor.ps1                   # Windows health check
+├── scripts/
+│   ├── pre-compact-summary.sh   # bash PreCompact hook
+│   ├── pre-compact-summary.ps1  # PowerShell PreCompact hook
+│   ├── post-compact-capture.sh  # bash PostCompact hook
+│   └── post-compact-capture.ps1 # PowerShell PostCompact hook
+├── settings-hooks-snippet.json  # hook config reference (macOS/Linux format)
+└── CLAUDE-md-addition.md        # the Session Resume block added to CLAUDE.md
 ```
 
-The `.py` files here are for reading — `install.sh` is what actually writes them to your machine. If you change the scripts, update the heredocs in `install.sh` first.
+The `scripts/` files are what the installers write to `~/.claude/scripts/`. If you change them, re-run the installer to push your changes to the active location.
 
 ---
 
@@ -135,15 +170,15 @@ The two files most worth rewriting are:
 
 **`CLAUDE-md-addition.md`** — this becomes the instruction Claude reads at the start of every session. It doesn't have to say what mine says. If you work in a way where something else matters more, write that instead.
 
-**The `additional_context` prompt in `pre-compact-summary.py`** — this is what gets passed to Claude during compaction to shape what it preserves. The four sections I used (overall task, decision chain, current state, open questions) are just one way to think about it. Rip them out. Add your own. Make it match how your brain actually organizes work.
+**The `CONTEXT` string in `pre-compact-summary.sh` (or `pre-compact-summary.ps1` on Windows)** — this is what gets passed to Claude during compaction to shape what it preserves. The six sections I used are just one way to think about it. Rip them out. Add your own. Make it match how your brain actually organizes work.
 
-```python
-# pre-compact-summary.py — find this string and rewrite it however you want
-additional_context = (
-    "COMPACTION IMMINENT — your summary MUST preserve ALL of the following:\n\n"
-    "1. OVERALL TASK ..."
-    # ↑ this is yours to change
-)
+```bash
+# pre-compact-summary.sh — find this variable and rewrite it however you want
+CONTEXT='COMPACTION IMMINENT — your summary MUST preserve ALL of the following:
+
+1. OVERALL TASK ...
+# ↑ this is yours to change
+'
 ```
 
 After editing, run the installer again to push your version to `~/.claude/scripts/`. Or edit the file directly there.
@@ -159,8 +194,15 @@ If you find a bug or want to improve something, feel free to open an issue or a 
 Before submitting a change:
 
 ```bash
+# macOS / Linux
 bash install.sh --preview   # make sure the completion screen still renders
-bash doctor.sh              # make sure all 8 checks pass on a real install
+bash doctor.sh              # make sure all checks pass on a real install
+```
+
+```powershell
+# Windows
+.\install.ps1 -Preview
+.\doctor.ps1
 ```
 
 ---
@@ -170,8 +212,9 @@ bash doctor.sh              # make sure all 8 checks pass on a real install
 | | Minimum | Notes |
 |---|---|---|
 | Claude Code | recent | needs `PreCompact` / `PostCompact` hook support |
-| Python | 3.7 | standard library only |
-| OS | macOS / Linux | untested on Windows |
+| bash | 3.2 | macOS ships 3.2; all Linux distros include it |
+| PowerShell | 5.1 | built into Windows 10+; no install needed |
+| OS | macOS / Linux / Windows | all supported natively |
 
 ---
 
