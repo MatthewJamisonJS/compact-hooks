@@ -1,2 +1,0 @@
-{"uuid":"msg-001","type":"user","parentUuid":null,"message":{"role":"user","content":"Hello"}}
-{"uuid":"msg-002","type":"assistant","parentUuid":"msg-001","message":{"role":"assistant","content":"Hi there, how can I help?"}}

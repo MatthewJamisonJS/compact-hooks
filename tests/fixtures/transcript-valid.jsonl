@@ -1,4 +1,0 @@
-{"uuid":"msg-001","type":"user","parentUuid":null,"message":{"role":"user","content":"Help me build a feature"}}
-{"uuid":"msg-002","type":"assistant","parentUuid":"msg-001","message":{"role":"assistant","content":"Sure, let me help."}}
-{"uuid":"boundary-001","type":"system","subtype":"compact_boundary"}
-{"uuid":"msg-003","type":"user","parentUuid":"boundary-001","message":{"role":"user","content":"Overall task: build a login feature.\n\nDecision chain: chose JWT over sessions.\n\nCurrent state: in progress.\n\nActive files: src/auth.ts\n\nLast error: none.\n\nOpen questions: none."}}

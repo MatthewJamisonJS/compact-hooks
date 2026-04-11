@@ -521,10 +521,22 @@ fi
 
 else
   # ── preview: inject sample data, skip all install steps ──────────────────────
+  # Compute line counts from source scripts if this is a local run; fall back to
+  # a plain note when piped via curl (BASH_SOURCE[0] is "bash" or unset).
+  _SRC_DIR=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
+    _SRC_DIR="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  fi
+  _pre_note="chmod +x"
+  _post_note="chmod +x"
+  if [[ -n "$_SRC_DIR" && -f "${_SRC_DIR}/scripts/pre-compact-summary.sh" ]]; then
+    _pre_note="$(_wc "${_SRC_DIR}/scripts/pre-compact-summary.sh") lines · chmod +x"
+    _post_note="$(_wc "${_SRC_DIR}/scripts/post-compact-capture.sh") lines · chmod +x"
+  fi
   _N_OK=3; _N_SKIP=1; _N_ERR=0
   {
-    printf '%s\tCREATED\t43 lines · chmod +x\n'           "$PRE_SCRIPT"
-    printf '%s\tCREATED\t130 lines · chmod +x\n'          "$POST_SCRIPT"
+    printf '%s\tCREATED\t%s\n'                              "$PRE_SCRIPT"    "$_pre_note"
+    printf '%s\tCREATED\t%s\n'                              "$POST_SCRIPT"   "$_post_note"
     printf '%s\tMERGED\tPreCompact + PostCompact added\n'  "$SETTINGS_PATH"
     printf '%s\tSKIPPED\tSession Resume already present\n' "$CLAUDE_MD"
   } > "$REPORT_FILE"

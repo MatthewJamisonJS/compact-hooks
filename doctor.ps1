@@ -12,7 +12,8 @@ Param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ClaudeDir    = [System.IO.Path]::Combine($env:USERPROFILE, '.claude')
+$UserHome     = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$ClaudeDir    = [System.IO.Path]::Combine($UserHome, '.claude')
 $ScriptsDir   = [System.IO.Path]::Combine($ClaudeDir, 'scripts')
 $SettingsPath = [System.IO.Path]::Combine($ClaudeDir, 'settings.json')
 $ClaudeMdPath = [System.IO.Path]::Combine($ClaudeDir, 'CLAUDE.md')

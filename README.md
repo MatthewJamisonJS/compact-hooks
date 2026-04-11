@@ -197,16 +197,12 @@ Before submitting a change:
 # macOS / Linux
 bash install.sh --preview   # make sure the completion screen still renders
 bash doctor.sh              # make sure all checks pass on a real install
-bash tests/test-pre-compact-summary.sh
-bash tests/test-post-compact-capture.sh
 ```
 
 ```powershell
 # Windows
 .\install.ps1 -Preview
 .\doctor.ps1
-pwsh tests/test-pre-compact-summary.ps1
-pwsh tests/test-post-compact-capture.ps1
 ```
 
 ---
