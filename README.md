@@ -25,10 +25,10 @@ This is just two small hook scripts and one line in your CLAUDE.md that work tog
 
 No other dependencies — no Python, Node, or any runtime.
 
-**macOS / Linux:**
+**macOS / Linux (bash, zsh, fish — any shell):**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh | bash
 ```
 
 **Windows (PowerShell 5.1+):**
@@ -37,8 +37,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hoo
 irm https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.ps1 | iex
 ```
 
-> **macOS / Linux:** Use `bash <(...)` rather than `curl ... | bash`. The `<(...)` form keeps your terminal's stdin connected so the interactive prompts work correctly.
->
 > **Windows:** If you see a security prompt about running remote scripts, run `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` first, then retry.
 
 Both installers show you what they're going to do before doing it, and ask to confirm each step. Running either installer again is safe.
@@ -46,8 +44,8 @@ Both installers show you what they're going to do before doing it, and ask to co
 **Just want to see what the finish screen looks like without actually installing?**
 
 ```bash
-# macOS / Linux
-bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh) --preview
+# macOS / Linux (bash, zsh, fish — any shell)
+curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh | bash -s -- --preview
 ```
 
 ```powershell
@@ -91,7 +89,7 @@ Start a new session after that. If a summary was saved, Claude will read it befo
 **macOS / Linux:**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.sh)
+curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.sh | bash
 ```
 
 **Windows:**

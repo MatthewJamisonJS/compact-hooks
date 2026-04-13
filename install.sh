@@ -2,7 +2,7 @@
 # compact-hooks installer — self-contained, works via curl or local run
 #
 # Usage:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh)
+#   curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/install.sh | bash
 #   bash install.sh [--verbose|-v] [--preview]
 #
 # --preview  renders the completion screen with sample data; nothing is installed
