@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash doctor.sh
-#   bash <(curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.sh)
+#   curl -fsSL https://raw.githubusercontent.com/MatthewJamisonJS/compact-hooks/main/doctor.sh | bash
 
 set -euo pipefail
 
